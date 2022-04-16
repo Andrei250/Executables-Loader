@@ -31,10 +31,10 @@ static void segvHandler(int signum, siginfo_t *info, void *context) {
 
 		for (i = 0; i < segNumber; ++i) {
 			uintptr_t vaddr = exec->segments[i].vaddr;
-			unsigned int fileSize = exec->segments[i].file_size;
+			unsigned int memSize = exec->segments[i].mem_size;
 
-			if (addrNr >= vaddr && addrNr < vaddr + fileSize) {
-				pgNr = (addrNr - vaddr) / pageSize;
+			if (addrNr >= vaddr && addrNr < vaddr + memSize) {
+				pgNr = (uintptr_t)(address - vaddr) / pageSize;
 				break;
 			}
 		}
@@ -42,40 +42,35 @@ static void segvHandler(int signum, siginfo_t *info, void *context) {
 		// If we cannot find the error in segments
 		// or the page is already mapped
 		// run the default handler
+		int *arr = i < segNumber ? (int *) exec->segments[i].data : NULL;
 
-		if (pgNr < 0) {
-			defaultAction.sa_sigaction(signum, info, context);
-			return;
-		}
-
-		int* arr = i < segNumber ? (int *) exec->segments[i].data : NULL;
-
-		if (arr[pgNr] == 1) {
+		if (pgNr < 0 || i >= segNumber || arr[pgNr] == 1) {
 			defaultAction.sa_sigaction(signum, info, context);
 			return;
 		}
 
 		// Otherwise, map the page
-		((int *) exec->segments[i].data)[pgNr] = 1;
-		char *receiveCode;
+		*((int *) exec->segments[i].data + pgNr) = 1;
+
+		char *rc;
 		int rcvCd;
 		int totalPages = exec->segments[i].file_size / pageSize;
 		uintptr_t vaddr = exec->segments[i].vaddr;
-		void *mapAddr = (void *)vaddr + pgNr * pageSize;
+		void *mapAddr = (void *)(vaddr + pgNr * pageSize);
 		int memLft = exec->segments[i].mem_size - exec->segments[i].file_size;
 
-		if (totalPages >= pgNr) {
-			receiveCode = mmap(mapAddr, pageSize, PROT_NONE,
+		if (pgNr <= totalPages) {
+			rc = mmap(mapAddr, pageSize, PROT_NONE,
 								MAP_PRIVATE | MAP_FIXED, filePointer,
 								pgNr * pageSize + exec->segments[i].offset);
-			
-			if (receiveCode < (char *) 0)
+
+			if (rc == (char *) -1)
 				exit(EXIT_FAILURE);
 		} else {
-			receiveCode = mmap(mapAddr, pageSize, PROT_NONE,
+			rc = mmap(mapAddr, pageSize, PROT_NONE,
 								MAP_SHARED | MAP_ANONYMOUS, 0, 0);
-			
-			if (receiveCode < (char *) 0)
+
+			if (rc == (char *) -1)
 				exit(EXIT_FAILURE);
 		}
 
@@ -84,14 +79,15 @@ static void segvHandler(int signum, siginfo_t *info, void *context) {
 		if (rcvCd < 0)
 			exit(EXIT_FAILURE);
 
-		// If it is the alst page, we should complete with 0s at the end
+		// If it is the last page, we should complete with 0s at the end
 		// of the file_size.
 		if (totalPages == pgNr && memLft) {
 			void *addr = (void *) (exec->segments[i].file_size + vaddr);
 			int space = (pgNr + 1) * pageSize - exec->segments[i].file_size;
-			receiveCode = memset(addr, 0, space);
 
-			if (receiveCode < (char *) 0)
+			rc = memset(addr, 0, space);
+
+			if (rc < (char *) 0)
 				exit(EXIT_FAILURE);
 		}
 	}
@@ -103,12 +99,11 @@ int so_init_loader(void)
 	int rc;
 	struct sigaction sa;
 
-	memset(&sa, 0, sizeof(sa));
-
 	sa.sa_flags = SA_SIGINFO;
 	sa.sa_sigaction = segvHandler;
 	sigemptyset(&sa.sa_mask);
 	sigaddset(&sa.sa_mask, SIGSEGV);
+
 	rc = sigaction(SIGSEGV, &sa, &defaultAction);
 
 	if (rc < 0)
@@ -121,9 +116,8 @@ int so_execute(char *path, char *argv[])
 {
 	filePointer = open(path, O_RDONLY);
 
-	if (filePointer < 0) {
+	if (filePointer < 0)
 		exit(EXIT_FAILURE);
-	}
 
 	exec = so_parse_exec(path);
 	if (!exec)
