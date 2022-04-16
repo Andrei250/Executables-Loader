@@ -1,0 +1,30 @@
+Dumitrescu Andrei 333CC
+
+Implementation:
+
+- Firstly I initialise a new sigaction with flags, handler and mask.
+- In so_execute, I opened the file with open() and then I will use 
+  the data void* to store an array on integer. For each page of that
+  segment, I have  avalue to check if that page is already mapped or not.
+- In the handler, the steps are exactly as mentioned in the homework statement
+  Firstly, I go through each segment and check if the address of the
+  information is between the start of the virtual address of one seg
+  and the end of it.
+
+- If the address is not for the segments, then we will do the default action.
+  Also, if the page is already mapped the default action will be used.
+
+- Now I am in the situation when the page is not mapped. There are 2 cases:
+  - case 1: the page is into the file range of addresses.
+  - case 2: the page is between the end of file addresses and mem_size
+
+- In each case I map the addres or the virtual address + addres of the page
+  and I use mprotect to give permission depending on the segment.
+
+- If the page is the last one, there is the situation when we should put 0s
+  at the end of file_size.
+
+- In the first case, I use mmap with the filePointer to laod the information
+  from file.
+
+- In the second case, I used 0, 0, because that page should contain only 0s.
